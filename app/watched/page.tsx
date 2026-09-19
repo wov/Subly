@@ -1,15 +1,30 @@
+import { redirect } from "next/navigation";
 import WatchedRow from "@/components/WatchedRow";
 import SetupGuide from "@/components/SetupGuide";
 import { listVideos } from "@/lib/refresh";
+import { getCurrentUser } from "@/lib/auth";
 import { dbConfigured } from "@/lib/db";
 import type { CardVideo } from "@/components/VideoCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function WatchedPage() {
+  let me: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    me = await getCurrentUser();
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
+  }
+  if (!me) redirect("/login");
+
   let videos: Awaited<ReturnType<typeof listVideos>> = [];
   try {
-    videos = await listVideos({ watched: true, limit: 500 });
+    videos = await listVideos(me.id, { watched: true, limit: 500 });
   } catch (err) {
     return (
       <SetupGuide

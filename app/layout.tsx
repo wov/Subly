@@ -2,14 +2,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import LogoutButton from "@/components/LogoutButton";
-import { authEnabled } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Subly · 视频订阅",
   description: "订阅 YouTube 与 B 站 UP 主，看过的自动消失，像 RSS 一样清爽",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // 数据库异常时按未登录处理（登录/注册页自身会渲染数据库引导页）
+  let username: string | null = null;
+  try {
+    username = (await getCurrentUser())?.username ?? null;
+  } catch {
+    username = null;
+  }
   return (
     <html lang="zh-CN">
       <head>
@@ -45,7 +52,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 订阅
               </Link>
             </nav>
-            <div className="ml-auto">{authEnabled() ? <LogoutButton /> : null}</div>
+            <div className="ml-auto flex items-center gap-3">
+              {username ? (
+                <>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    @{username}
+                  </span>
+                  <LogoutButton />
+                </>
+              ) : (
+                <Link
+                  href="/login"
+                  className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-red-700"
+                >
+                  登录
+                </Link>
+              )}
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>

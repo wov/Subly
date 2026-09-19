@@ -1,20 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, authEnabled, verifyPasscode } from "@/lib/auth";
+import {
+  createSession,
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  verifyPassword,
+} from "@/lib/auth";
+import { ensureSchema, sql, typed, type User } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
-  if (!authEnabled()) return NextResponse.json({ ok: true });
-  const { passcode } = (await req.json().catch(() => ({}))) as { passcode?: string };
-  const token = await verifyPasscode(passcode ?? "");
-  if (token === null) {
-    return NextResponse.json({ error: "密码不正确" }, { status: 401 });
+  const { username, password } = (await req.json().catch(() => ({}))) as {
+    username?: string;
+    password?: string;
+  };
+  await ensureSchema();
+  const rows = typed<User>(await sql`
+    SELECT * FROM users WHERE username = ${(username ?? "").trim()}
+  `);
+  const user = rows[0];
+  if (!user || !verifyPassword(password ?? "", user.password_hash)) {
+    return NextResponse.json({ error: "用户名或密码不正确" }, { status: 401 });
   }
+  const token = await createSession(user.id);
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 30,
-    path: "/",
-  });
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
 }

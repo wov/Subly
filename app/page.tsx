@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import VideoCard, { type CardVideo } from "@/components/VideoCard";
 import MarkAllButton from "@/components/MarkAllButton";
 import RefreshButton from "@/components/RefreshButton";
 import SetupGuide from "@/components/SetupGuide";
 import { listChannels, listVideos, maybeAutoRefresh } from "@/lib/refresh";
+import { getCurrentUser } from "@/lib/auth";
 import { dbConfigured } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -16,15 +18,29 @@ export default async function HomePage({
   const { channel } = await searchParams;
   const channelId = channel && /^\d+$/.test(channel) ? Number(channel) : undefined;
 
+  // 注意：redirect() 以异常形式跳出，不能包在 try/catch 里，故先用 getCurrentUser 再手动跳转
+  let me: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    me = await getCurrentUser();
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
+  }
+  if (!me) redirect("/login");
+
   let channels: Awaited<ReturnType<typeof listChannels>> = [];
   let videos: Awaited<ReturnType<typeof listVideos>> = [];
   const unwatchedByChannel = new Map<number, number>();
   try {
-    await maybeAutoRefresh();
+    await maybeAutoRefresh(me.id);
     const [ch, filtered, allUnwatched] = await Promise.all([
-      listChannels(),
-      listVideos({ watched: false, channelId }),
-      listVideos({ watched: false, limit: 1000 }),
+      listChannels(me.id),
+      listVideos(me.id, { watched: false, channelId }),
+      listVideos(me.id, { watched: false, limit: 1000 }),
     ]);
     channels = ch;
     videos = filtered;

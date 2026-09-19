@@ -1,24 +1,32 @@
+import { redirect } from "next/navigation";
 import AddChannelForm from "@/components/AddChannelForm";
 import ChannelManager, { type ManagedChannel } from "@/components/ChannelManager";
 import RefreshButton from "@/components/RefreshButton";
 import SetupGuide from "@/components/SetupGuide";
-import { listChannels } from "@/lib/refresh";
-import { dbConfigured, ensureSchema, sql, typed } from "@/lib/db";
+import { listChannels, channelCounts } from "@/lib/refresh";
+import { getCurrentUser } from "@/lib/auth";
+import { dbConfigured } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChannelsPage() {
-  let channels: Awaited<ReturnType<typeof listChannels>> = [];
-  let counts: { channel_id: number; unwatched: number; total: number }[] = [];
+  let me: Awaited<ReturnType<typeof getCurrentUser>>;
   try {
-    await ensureSchema();
-    channels = await listChannels();
-    counts = typed<{ channel_id: number; unwatched: number; total: number }>(await sql`
-      SELECT channel_id,
-             COUNT(*) FILTER (WHERE watched = false)::int AS unwatched,
-             COUNT(*)::int AS total
-      FROM videos GROUP BY channel_id
-    `);
+    me = await getCurrentUser();
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
+  }
+  if (!me) redirect("/login");
+
+  let channels: Awaited<ReturnType<typeof listChannels>> = [];
+  let counts: Awaited<ReturnType<typeof channelCounts>> = [];
+  try {
+    [channels, counts] = await Promise.all([listChannels(me.id), channelCounts(me.id)]);
   } catch (err) {
     return (
       <SetupGuide

@@ -77,8 +77,44 @@ export function ensureSchema(): Promise<void> {
           UNIQUE (channel_id, video_id)
         )
       `.then(() =>
-        sql`CREATE INDEX IF NOT EXISTS idx_videos_watched ON videos (watched, published_at DESC)`
-      ).then(() => undefined)
+        sql`
+          CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )
+        `.then(() =>
+          sql`
+            CREATE TABLE IF NOT EXISTS sessions (
+              token_hash TEXT PRIMARY KEY,
+              user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              expires_at TIMESTAMPTZ NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+          `.then(() =>
+            sql`
+              CREATE TABLE IF NOT EXISTS subscriptions (
+                user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                channel_id INT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (user_id, channel_id)
+              )
+            `.then(() =>
+              sql`
+                CREATE TABLE IF NOT EXISTS watched (
+                  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  video_id INT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                  watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (user_id, video_id)
+                )
+              `.then(() =>
+                sql`CREATE INDEX IF NOT EXISTS idx_videos_published ON videos (published_at DESC)`
+              ).then(() => undefined)
+            )
+          )
+        )
+      )
     ).catch((err) => {
       schemaReady = null; // 允许下次重试
       throw err;
@@ -118,6 +154,13 @@ export async function dbStatus(): Promise<{ configured: boolean; connected: bool
     };
   }
 }
+
+export type User = {
+  id: number;
+  username: string;
+  password_hash: string;
+  created_at: Date;
+};
 
 export type Channel = {
   id: number;
