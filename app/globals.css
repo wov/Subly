@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+body {
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+/* 已看元素淡出过渡 */
+.fade-out {
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
