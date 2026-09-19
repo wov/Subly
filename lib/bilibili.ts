@@ -2,7 +2,25 @@ import { createHash } from "node:crypto";
 import type { FetchedChannel, FetchedVideo, PlatformAdapter } from "./types";
 
 const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+
+// —— Cookie 工具：把多个 Cookie 串合并成一个（后者覆盖同名项）——
+function mergeCookie(...sources: string[]): string {
+  const jar = new Map<string, string>();
+  for (const source of sources) {
+    for (const pair of source.split(";").map((s) => s.trim()).filter(Boolean)) {
+      const idx = pair.indexOf("=");
+      if (idx > 0) jar.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
+    }
+  }
+  return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+/** 可选环境变量：用户从浏览器复制的 B 站 Cookie（含 SESSDATA 登录态），海外服务器被 412 风控时的终极兜底 */
+function withEnvCookie(cookie: string): string {
+  const env = process.env.BILIBILI_COOKIE?.trim();
+  return env ? mergeCookie(cookie, env) : cookie;
+}
 
 // WBI 签名所需的混淆字符表（B 站 web 端公开算法）
 const MIXIN_KEY_ENC_TAB = [
@@ -16,11 +34,12 @@ type BiliApi<T> = { code: number; message: string; data: T };
 
 let wbiCache: { key: string; cookie: string; expire: number } | null = null;
 
-async function biliFetch(url: string, cookie?: string, timeoutMs = 12000) {
+async function biliFetch(url: string, cookie?: string, timeoutMs = 12000, referer?: string) {
   const headers: Record<string, string> = {
     "User-Agent": UA,
-    Referer: "https://www.bilibili.com/",
+    Referer: referer ?? "https://www.bilibili.com/",
     Accept: "application/json",
+    "Accept-Language": "zh-CN,zh;q=0.9",
   };
   if (cookie) headers.Cookie = cookie;
   const res = await fetch(url, {
@@ -67,10 +86,87 @@ function wbiSign(params: Record<string, string | number>, wbiKey: string): strin
   return `${query}&w_rid=${wRid}`;
 }
 
-async function wbiGet<T>(path: string, params: Record<string, string | number>): Promise<T> {
+// —— dm_* 风控参数（模拟浏览器环境指纹；2026 起 wbi 网关缺失这些参数会直接 HTTP 412）——
+// 算法照搬 RSSHub / yt-dlp 的公开实现
+const DM_IMG_STR = Buffer.from("no webgl").toString("base64").slice(0, -2);
+
+function gaussianInt(mean: number, std: number): number {
+  const u1 = Math.max(Math.random(), 1e-9);
+  const u2 = Math.random();
+  const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return Math.round(z0 * std + mean);
+}
+
+function dmWh(width: number, height: number): [number, number, number] {
+  const seed = Math.floor(114 * Math.random());
+  return [2 * width + 2 * height + 3 * seed, 4 * width - height + seed, seed];
+}
+
+function dmOf(top: number, left: number): [number, number, number] {
+  const seed = Math.floor(514 * Math.random());
+  return [3 * top + 2 * left + seed, 4 * top - 4 * left + 2 * seed, seed];
+}
+
+function dmVerifyParams(): Record<string, string> {
+  // 鼠标轨迹采样点
+  const x = Math.max(gaussianInt(1245, 5), 0);
+  const y = Math.max(gaussianInt(1285, 5), 0);
+  const dmImgList = JSON.stringify([
+    { x: 3 * x + 2 * y, y: 4 * x - 5 * y, z: 0, timestamp: Math.max(gaussianInt(30, 5), 0), type: 0 },
+  ]);
+  // 页面交互指纹（两个 div 的位置/尺寸 + 视口 + 偏移）
+  const p1 = dmWh(274, 601);
+  const s1 = dmOf(134, 30);
+  const p2 = dmWh(332, 64);
+  const s2 = dmOf(1101, 338);
+  const of = dmOf(0, 0);
+  const b64 = (s: string) => Buffer.from(s).toString("base64").slice(0, -2);
+  const dmImgInter = JSON.stringify({
+    ds: [
+      { t: 2, c: b64("clearfix g-search search-container"), p: [p1[0], p1[2], p1[1]], s: [s1[2], s1[0], s1[1]] },
+      { t: 2, c: b64("wrapper"), p: [p2[0], p2[2], p2[1]], s: [s2[2], s2[0], s2[1]] },
+    ],
+    wh: dmWh(1245, 1285),
+    of,
+  });
+  return {
+    dm_img_list: dmImgList,
+    dm_img_str: DM_IMG_STR,
+    dm_cover_img_str: DM_IMG_STR,
+    dm_img_inter: dmImgInter,
+  };
+}
+
+/** 先访问一次空间视频页：激活 buvid 游客 Cookie、收集 b_nut 等额外 Cookie（绕 412 的关键一步） */
+async function warmupPage(url: string, cookie: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, Referer: "https://www.bilibili.com/", Cookie: cookie },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+    const setCookies =
+      (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+    return setCookies.length ? mergeCookie(cookie, ...setCookies) : cookie;
+  } catch {
+    return cookie; // 预热失败不阻断主流程
+  }
+}
+
+async function wbiGet<T>(
+  path: string,
+  params: Record<string, string | number>,
+  opts: { referer?: string; warmup?: (cookie: string) => Promise<string> } = {}
+): Promise<T> {
   const attempt = async (force: boolean): Promise<BiliApi<unknown>> => {
     const { key, cookie } = await getWbi(force);
-    return biliFetch(`https://api.bilibili.com${path}?${wbiSign(params, key)}`, cookie);
+    const warmed = opts.warmup ? await opts.warmup(cookie) : cookie;
+    return biliFetch(
+      `https://api.bilibili.com${path}?${wbiSign(params, key)}`,
+      withEnvCookie(warmed),
+      12000,
+      opts.referer
+    );
   };
   let data: BiliApi<unknown>;
   try {
@@ -151,12 +247,26 @@ type ArcRow = {
 };
 
 async function arcSearch(mid: string): Promise<ArcRow[]> {
-  const data = await wbiGet<{ list: { vlist: ArcRow[] } }>("/x/space/wbi/arc/search", {
-    mid,
-    pn: 1,
-    ps: 30,
-    order: "pubdate",
-  });
+  const spaceUrl = `https://space.bilibili.com/${mid}/video?tid=0&page=1&keyword=&order=pubdate`;
+  const data = await wbiGet<{ list: { vlist: ArcRow[] } }>(
+    "/x/space/wbi/arc/search",
+    {
+      mid,
+      pn: 1,
+      ps: 30,
+      tid: 0,
+      keyword: "",
+      order: "pubdate",
+      platform: "web",
+      web_location: 1550101,
+      order_avoided: "true",
+      ...dmVerifyParams(),
+    },
+    {
+      referer: spaceUrl,
+      warmup: (cookie) => warmupPage(spaceUrl, cookie),
+    }
+  );
   return data.list.vlist;
 }
 

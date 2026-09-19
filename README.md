@@ -71,7 +71,7 @@ npm run dev
 | 平台 | 数据来源 | 说明 |
 | --- | --- | --- |
 | YouTube | 官方频道 RSS（无需 Key） | RSS 故障时自动回退到频道页解析 |
-| Bilibili | Web 端公开接口（WBI 签名） | 游客 Cookie + WBI 签名，无需账号 |
+| Bilibili | Web 端公开接口（WBI 签名） | 游客 Cookie + WBI 签名 + dm 风控参数 + 空间页预热，无需账号 |
 
 - 每次拉取只新增视频，不会覆盖「已看」状态
 - 已看 / 未看数据存在 Postgres 中，换设备登录状态一致
@@ -82,6 +82,7 @@ npm run dev
 | --- | --- | --- |
 | `DATABASE_URL` 或 Vercel Postgres 自动注入的 `POSTGRES_URL` 等 | ✅ | 数据库连接（Vercel 上创建 Storage 后自动注入） |
 | `REGISTER_CODE` | 可选 | 注册邀请码（不设置则开放注册） |
+| `BILIBILI_COOKIE` | 可选 | B 站登录 Cookie 兜底。服务器部署在海外时可能被 B 站风控拦截（HTTP 412）：浏览器登录 B 站 → F12 → 网络 → 任意请求 → 复制完整 Cookie 值填入即可（含 `SESSDATA` 生效最稳） |
 | `CRON_SECRET` | 自动 | Vercel Cron 鉴权（平台自动注入，无需手动设置） |
 
 ## License
