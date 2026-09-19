@@ -172,6 +172,7 @@ async function fetchVideos(mid: string): Promise<FetchedVideo[]> {
       thumbnailUrl: pic,
       description: (v.description || "").slice(0, 500),
       publishedAt: new Date(v.created * 1000),
+      author: v.author,
     } satisfies FetchedVideo;
   });
 }

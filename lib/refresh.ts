@@ -68,6 +68,10 @@ export async function refreshChannel(channel: Channel): Promise<number> {
     `;
   }
   await sql`UPDATE channels SET last_fetched_at = now() WHERE id = ${channel.id}`;
+  // 订阅时没拿到频道名（如 B 站风控拦截）→ 用视频作者名补齐
+  if ((!channel.name || channel.name === "加载中…") && videos[0]?.author) {
+    await sql`UPDATE channels SET name = ${videos[0].author} WHERE id = ${channel.id}`;
+  }
   return videos.length;
 }
 

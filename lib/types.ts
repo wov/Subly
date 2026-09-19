@@ -15,6 +15,8 @@ export type FetchedVideo = {
   thumbnailUrl: string | null;
   description: string | null;
   publishedAt: Date;
+  /** 作者名（订阅时频道名缺失可用来补齐） */
+  author?: string;
 };
 
 export interface PlatformAdapter {

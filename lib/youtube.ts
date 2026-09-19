@@ -5,15 +5,20 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 async function fetchPage(url: string, timeoutMs = 10000): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": UA,
-      "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8",
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: "follow",
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: "follow",
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error("连接 YouTube 失败（网络超时或被拦截）");
+  }
   if (!res.ok) throw new Error(`请求 YouTube 页面失败（HTTP ${res.status}）`);
   return res.text();
 }
@@ -203,6 +208,7 @@ async function fetchVideos(channelId: string): Promise<FetchedVideo[]> {
               (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : null),
             description: description.slice(0, 500),
             publishedAt: new Date(String(e["published"] ?? 0)),
+            author: String((e["author"] as YtNode | undefined)?.name ?? "") || undefined,
           } satisfies FetchedVideo;
         });
       }
