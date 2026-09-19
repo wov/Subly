@@ -55,19 +55,28 @@ export async function refreshChannel(channel: Channel): Promise<number> {
   const adapter = ADAPTERS[channel.platform];
   const videos = await adapter.fetchVideos(channel.platform_id);
   if (videos.length > 0) {
-    // 嵌套数组参数会被 postgres.js 展开为 VALUES (...), (...), ...
-    const rows = videos.map((v) => [
-      v.videoId,
-      v.title,
-      v.url,
-      v.thumbnailUrl,
-      v.description,
-      v.publishedAt,
-    ]);
+    // postgres.js 多行插入：sql(对象数组, 列名...) 生成
+    // insert into videos ("col", ...) values ($1, $2, ...), (...) ...
+    const rows = videos.map((v) => ({
+      channel_id: channel.id,
+      video_id: v.videoId,
+      title: v.title,
+      url: v.url,
+      thumbnail_url: v.thumbnailUrl,
+      description: v.description,
+      published_at: v.publishedAt,
+    }));
     await sql`
-      INSERT INTO videos (channel_id, video_id, title, url, thumbnail_url, description, published_at)
-      SELECT ${channel.id} AS cid, t.*
-      FROM (VALUES ${rows}) AS t(video_id, title, url, thumbnail_url, description, published_at)
+      INSERT INTO videos ${sql(
+        rows,
+        "channel_id",
+        "video_id",
+        "title",
+        "url",
+        "thumbnail_url",
+        "description",
+        "published_at"
+      )}
       ON CONFLICT (channel_id, video_id) DO NOTHING
     `;
   }
