@@ -2,7 +2,9 @@ import Link from "next/link";
 import VideoCard, { type CardVideo } from "@/components/VideoCard";
 import MarkAllButton from "@/components/MarkAllButton";
 import RefreshButton from "@/components/RefreshButton";
+import SetupGuide from "@/components/SetupGuide";
 import { listChannels, listVideos, maybeAutoRefresh } from "@/lib/refresh";
+import { dbConfigured } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -11,19 +13,32 @@ export default async function HomePage({
 }: {
   searchParams: Promise<{ channel?: string }>;
 }) {
-  await maybeAutoRefresh();
   const { channel } = await searchParams;
   const channelId = channel && /^\d+$/.test(channel) ? Number(channel) : undefined;
 
-  const [channels, videos] = await Promise.all([
-    listChannels(),
-    listVideos({ watched: false, channelId }),
-  ]);
-
+  let channels: Awaited<ReturnType<typeof listChannels>> = [];
+  let videos: Awaited<ReturnType<typeof listVideos>> = [];
   const unwatchedByChannel = new Map<number, number>();
-  for (const ch of channels) unwatchedByChannel.set(ch.id, 0);
-  for (const v of await listVideos({ watched: false, limit: 1000 })) {
-    unwatchedByChannel.set(v.channel_id, (unwatchedByChannel.get(v.channel_id) ?? 0) + 1);
+  try {
+    await maybeAutoRefresh();
+    const [ch, filtered, allUnwatched] = await Promise.all([
+      listChannels(),
+      listVideos({ watched: false, channelId }),
+      listVideos({ watched: false, limit: 1000 }),
+    ]);
+    channels = ch;
+    videos = filtered;
+    for (const c of ch) unwatchedByChannel.set(c.id, 0);
+    for (const v of allUnwatched) {
+      unwatchedByChannel.set(v.channel_id, (unwatchedByChannel.get(v.channel_id) ?? 0) + 1);
+    }
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
   }
 
   const cards: CardVideo[] = videos.map((v) => ({

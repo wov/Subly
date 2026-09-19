@@ -1,11 +1,23 @@
 import WatchedRow from "@/components/WatchedRow";
+import SetupGuide from "@/components/SetupGuide";
 import { listVideos } from "@/lib/refresh";
+import { dbConfigured } from "@/lib/db";
 import type { CardVideo } from "@/components/VideoCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function WatchedPage() {
-  const videos = await listVideos({ watched: true, limit: 500 });
+  let videos: Awaited<ReturnType<typeof listVideos>> = [];
+  try {
+    videos = await listVideos({ watched: true, limit: 500 });
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
+  }
   const cards: CardVideo[] = videos.map((v) => ({
     id: v.id,
     title: v.title,

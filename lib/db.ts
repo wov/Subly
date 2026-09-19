@@ -92,6 +92,33 @@ export function typed<T>(rows: unknown): T[] {
   return rows as T[];
 }
 
+/** 数据库是否已配置（环境变量是否存在） */
+export function dbConfigured(): boolean {
+  const e = process.env;
+  return Boolean(
+    e.DATABASE_URL || e.POSTGRES_URL || e.POSTGRES_URL_UNPOOOL ||
+      (e.POSTGRES_HOST && e.POSTGRES_USER && e.POSTGRES_PASSWORD && e.POSTGRES_DATABASE)
+  );
+}
+
+/** 数据库连通性诊断（供 /api/health 与错误页使用） */
+export async function dbStatus(): Promise<{ configured: boolean; connected: boolean; error?: string }> {
+  if (!dbConfigured()) return { configured: false, connected: false };
+  try {
+    await Promise.race([
+      ensureSchema(),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("连接超时（10 秒）")), 10000)),
+    ]);
+    return { configured: true, connected: true };
+  } catch (err) {
+    return {
+      configured: true,
+      connected: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export type Channel = {
   id: number;
   platform: "youtube" | "bilibili";

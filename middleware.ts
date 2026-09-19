@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, authEnabled, isValidToken } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/cron"];
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/cron", "/api/health"];
 
 export async function middleware(req: NextRequest) {
   if (!authEnabled()) return NextResponse.next();

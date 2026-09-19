@@ -1,20 +1,32 @@
 import AddChannelForm from "@/components/AddChannelForm";
 import ChannelManager, { type ManagedChannel } from "@/components/ChannelManager";
 import RefreshButton from "@/components/RefreshButton";
+import SetupGuide from "@/components/SetupGuide";
 import { listChannels } from "@/lib/refresh";
-import { ensureSchema, sql, typed } from "@/lib/db";
+import { dbConfigured, ensureSchema, sql, typed } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChannelsPage() {
-  await ensureSchema();
-  const channels = await listChannels();
-  const counts = typed<{ channel_id: number; unwatched: number; total: number }>(await sql`
-    SELECT channel_id,
-           COUNT(*) FILTER (WHERE watched = false)::int AS unwatched,
-           COUNT(*)::int AS total
-    FROM videos GROUP BY channel_id
-  `);
+  let channels: Awaited<ReturnType<typeof listChannels>> = [];
+  let counts: { channel_id: number; unwatched: number; total: number }[] = [];
+  try {
+    await ensureSchema();
+    channels = await listChannels();
+    counts = typed<{ channel_id: number; unwatched: number; total: number }>(await sql`
+      SELECT channel_id,
+             COUNT(*) FILTER (WHERE watched = false)::int AS unwatched,
+             COUNT(*)::int AS total
+      FROM videos GROUP BY channel_id
+    `);
+  } catch (err) {
+    return (
+      <SetupGuide
+        configured={dbConfigured()}
+        error={err instanceof Error ? err.message : String(err)}
+      />
+    );
+  }
   const byId = new Map(counts.map((c) => [c.channel_id, c]));
   const managed: ManagedChannel[] = channels.map((c) => ({
     id: c.id,
